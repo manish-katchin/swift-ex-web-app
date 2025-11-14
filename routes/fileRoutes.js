@@ -11,51 +11,43 @@ const s3 = new aws.S3({
 
 
 const uploadToS3 = async (file) => {
-    console.log("the file name original name", file.originalname)
-    const urlKey = `${file.originalname}`;
+    const fileName = `${Date.now()}-${file.originalname}`;
+    const folder = process.env.S3_FOLDER || "s3-objects";
+
     const params = {
-        Body: file.buffer,
         Bucket: process.env.S3_BUCKET_NAME,
-        Key: urlKey,
-        ACL: 'public-read',
-        ContentType: file.mimetype,
+        Key: `${folder}/${fileName}`,
+        Body: file.buffer,
+        ContentType: file.mimetype
     };
 
-    return s3.putObject(params).promise()
-        .then(() => {
-            return process.env.AWS_URL + urlKey;
-        })
-        .catch(error => {
-            console.error("S3 Upload Error:", error);
-            throw new Error("Failed to upload to S3");
-        });
+    await s3.putObject(params).promise();
+
+    return `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${folder}/${fileName}`;
 };
 
 router.post("/upload-image", upload.single("file"), async (req, res) => {
-    if (!req.file) {
-        return res.status(400).json({ error: "File is required" });
-    }
-
-    const { mimetype } = req.file;
-    const allowedTypes = ['image/webp', 'image/x-webp', 'image/jpeg', 'image/png', 'image/gif', 'video/mp4', 'video/quicktime'];
-
-    if (!allowedTypes.includes(mimetype)) {
-        return res.status(400).json({ error: "Invalid file type" });
-    }
-
     try {
-        const uploadedImageUrl = await uploadToS3(req.file);
-        console.log('the upload url', uploadedImageUrl)
-        let fileName = req.file.originalname;
-        const url = `https://swiftex.s3.ap-south-1.amazonaws.com/${fileName}`;
-        console.log("uplaod imag eurl", url)
+        if (!req.file)
+            return res.status(400).json({ error: "File is required" });
 
-        res.json({ imageUrl: url });
+        const allowedTypes = [
+            'image/webp', 'image/x-webp',
+            'image/jpeg', 'image/png', 'image/gif',
+            'video/mp4', 'video/quicktime'
+        ];
+
+        if (!allowedTypes.includes(req.file.mimetype))
+            return res.status(400).json({ error: "Invalid file type" });
+
+        const url = await uploadToS3(req.file);
+
+        return res.json({ imageUrl: url });
+
     } catch (error) {
-        console.error("Error uploading file:", error);
-        res.status(500).json({ error: "Failed to upload image" });
+        console.error("S3 Error:", error);
+        return res.status(500).json({ error: "Upload failed" });
     }
 });
 
 module.exports = router;
-
