@@ -9,21 +9,17 @@ const s3 = new aws.S3({
     region: process.env.AWS_DEFAULT_REGION,
 });
 
-
 const uploadToS3 = async (file) => {
     const fileName = `${Date.now()}-${file.originalname}`;
-    const folder = process.env.S3_FOLDER || "s3-objects";
 
     const params = {
         Bucket: process.env.S3_BUCKET_NAME,
-        Key: `${folder}/${fileName}`,
+        Key: fileName,
         Body: file.buffer,
         ContentType: file.mimetype
     };
-
     await s3.putObject(params).promise();
-
-    return `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${folder}/${fileName}`;
+    return fileName;
 };
 
 router.post("/upload-image", upload.single("file"), async (req, res) => {
@@ -40,9 +36,8 @@ router.post("/upload-image", upload.single("file"), async (req, res) => {
         if (!allowedTypes.includes(req.file.mimetype))
             return res.status(400).json({ error: "Invalid file type" });
 
-        const url = await uploadToS3(req.file);
-
-        return res.json({ imageUrl: url });
+        const key = await uploadToS3(req.file);
+        return res.json({ imageUrl: key });
 
     } catch (error) {
         console.error("S3 Error:", error);

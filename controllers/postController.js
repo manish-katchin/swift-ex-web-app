@@ -87,7 +87,6 @@ exports.getPost = async (req, res) => {
     });
   }
 };
-
 exports.createPost = async (req, res) => {
   try {
     const { title, content, tags, excerpt, imageUrl } = req.body;
@@ -96,22 +95,21 @@ exports.createPost = async (req, res) => {
         message: 'Title, content, and excerpt are required'
       });
     }
-
     if (!req.user || !req.user.id) {
       return res.status(401).json({ message: 'User authentication required' });
     }
-    let baseSlug = slugify(title, { lower: true, strict: true, trim: true });
-    let slug = baseSlug;
-    let counter = 1;
 
-    while (await Post.findOne({ slug })) {
-      slug = `${baseSlug}-${counter}`;
-      counter++;
+    const baseSlug = slugify(title, { lower: true, strict: true, trim: true });
+
+    const existingPost = await Post.findOne({ slug: baseSlug });
+    if (existingPost) {
+      return res.status(400).json({
+        message: 'A post with this title already exists. Please use a different title.'
+      });
     }
-
     const newPost = new Post({
       title,
-      slug,
+      slug: baseSlug,
       content,
       tags: Array.isArray(tags) ? tags : (tags ? [tags] : []),
       excerpt,
@@ -120,7 +118,6 @@ exports.createPost = async (req, res) => {
     });
 
     const post = await newPost.save();
-
     await post.populate('author', 'username');
 
     res.status(201).json({
@@ -139,7 +136,7 @@ exports.createPost = async (req, res) => {
 exports.updatePost = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, content, tags, excerpt, imageUrl } = req.body;
+    const { content, tags, excerpt, imageUrl } = req.body;
 
     if (!id) {
       return res.status(400).json({ message: 'Post ID is required' });
@@ -150,13 +147,7 @@ exports.updatePost = async (req, res) => {
     }
 
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(id);
-
-    let query;
-    if (isObjectId) {
-      query = { _id: id };
-    } else {
-      query = { slug: id };
-    }
+    const query = isObjectId ? { _id: id } : { slug: id };
 
     const post = await Post.findOne(query);
 
@@ -167,19 +158,6 @@ exports.updatePost = async (req, res) => {
     if (post.author.toString() !== req.user.id) {
       return res.status(403).json({ message: 'Unauthorized action' });
     }
-    if (title && title !== post.title) {
-      let baseSlug = slugify(title, { lower: true, strict: true, trim: true });
-      let slug = baseSlug;
-      let counter = 1;
-
-      while (await Post.findOne({ slug, _id: { $ne: post._id } })) {
-        slug = `${baseSlug}-${counter}`;
-        counter++;
-      }
-      post.slug = slug;
-      post.title = title;
-    }
-
     if (content !== undefined) post.content = content;
     if (tags !== undefined) post.tags = Array.isArray(tags) ? tags : (tags ? [tags] : []);
     if (excerpt !== undefined) post.excerpt = excerpt;
