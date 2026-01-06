@@ -10,18 +10,20 @@ const s3 = new aws.S3({
 });
 
 const uploadToS3 = async (file) => {
+    const folder = process.env.S3_FOLDER || "s3-objects";
     const fileName = `${Date.now()}-${file.originalname}`;
 
-    const params = {
+    const s3Key = `${folder}/${fileName}`;
+
+    await s3.putObject({
         Bucket: process.env.S3_BUCKET_NAME,
-        Key: fileName,
+        Key: s3Key,
         Body: file.buffer,
-        ContentType: file.mimetype
-    };
-    await s3.putObject(params).promise();
+        ContentType: file.mimetype,
+    }).promise();
+
     return fileName;
 };
-
 router.post("/upload-image", upload.single("file"), async (req, res) => {
     try {
         if (!req.file)
