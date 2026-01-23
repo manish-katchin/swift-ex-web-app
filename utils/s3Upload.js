@@ -6,8 +6,6 @@ const fs = require('fs');
 require('dotenv').config();
 
 const AWS = require("aws-sdk");
-
-// Configure AWS with the credentials
 const s3 = new AWS.S3();
 
 AWS.config.update({
@@ -33,16 +31,16 @@ const generateUploadURL = async (fileType) => {
   return { signedUrl, key };
 };
 async function uploadImageToStorage(file) {
-    const fileStream = fs.createReadStream(file.path);
-    const uploadParams = {
-      Bucket: process.env.S3_BUCKET_NAME,
-      Body: fileStream,
-      Key: `${Date.now()}_${file.originalname}`, // Generate a unique key for the file
-    };
-  
-    const { Location } = await s3.upload(uploadParams).promise();
-    return Location; // This is the URL of the uploaded file
-  }
-  
+  const fileStream = fs.createReadStream(file.path);
+  const uploadParams = {
+    Bucket: process.env.S3_BUCKET_NAME,
+    Body: fileStream,
+    Key: `${Date.now()}_${file.originalname}`,
+  };
+
+  const { Location } = await s3.upload(uploadParams).promise();
+  return Location;
+}
+
 
 module.exports = { generateUploadURL, uploadImageToStorage };

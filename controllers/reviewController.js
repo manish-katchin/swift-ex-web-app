@@ -4,7 +4,7 @@ const Post = require('../models/Post');
 exports.createReview = async (req, res) => {
   try {
     const { content, rating } = req.body;
-    console.log(req.body , 'hii i am requjest body')
+    console.log(req.body, 'hii i am requjest body')
     const postId = req.params.postId;
 
     console.log(postId, 'hii i am post id --------------')
@@ -89,10 +89,7 @@ exports.deleteReview = async (req, res) => {
     if (review.author.toString() !== req.user.id) {
       return res.status(403).json({ message: 'Unauthorized action' });
     }
-
     await Review.findByIdAndDelete(reviewId);
-    
-    // Remove the review from the post's reviews array
     await Post.findByIdAndUpdate(review.post, { $pull: { reviews: reviewId } });
 
     res.status(200).json({ message: 'Review deleted successfully' });
