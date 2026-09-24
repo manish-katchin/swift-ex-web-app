@@ -19,6 +19,159 @@ const coinGeckoClient = axios.create({
     timeout: 30000
 });
 
+const COINGECKO_MAP = {
+    btc: 'bitcoin',
+    bitcoin: 'bitcoin',
+    eth: 'ethereum',
+    ethereum: 'ethereum',
+    usdt: 'tether',
+    tether: 'tether',
+    bnb: 'binancecoin',
+    binancecoin: 'binancecoin',
+    sol: 'solana',
+    solana: 'solana',
+    usdc: 'usd-coin',
+    'usd-coin': 'usd-coin',
+    xrp: 'ripple',
+    ripple: 'ripple',
+    doge: 'dogecoin',
+    dogecoin: 'dogecoin',
+    ada: 'cardano',
+    cardano: 'cardano',
+    trx: 'tron',
+    tron: 'tron',
+    avax: 'avalanche-2',
+    avalanche: 'avalanche-2',
+    shib: 'shiba-inu',
+    'shiba-inu': 'shiba-inu',
+    ton: 'the-open-network',
+    toncoin: 'the-open-network',
+    sui: 'sui',
+    dot: 'polkadot',
+    polkadot: 'polkadot',
+    link: 'chainlink',
+    chainlink: 'chainlink',
+    bch: 'bitcoin-cash',
+    'bitcoin-cash': 'bitcoin-cash',
+    near: 'near',
+    matic: 'matic-network',
+    pol: 'polygon-ecosystem-token',
+    polygon: 'matic-network',
+    ltc: 'litecoin',
+    litecoin: 'litecoin',
+    uni: 'uniswap',
+    uniswap: 'uniswap',
+    apt: 'aptos',
+    aptos: 'aptos',
+    pepe: 'pepe',
+    icp: 'internet-computer',
+    kas: 'kaspa',
+    kaspa: 'kaspa',
+    etc: 'ethereum-classic',
+    fet: 'artificial-superintelligence-alliance',
+    xlm: 'stellar',
+    stellar: 'stellar',
+    xmr: 'monero',
+    monero: 'monero',
+    dai: 'dai',
+    okb: 'okb',
+    stx: 'blockstack',
+    fil: 'filecoin',
+    filecoin: 'filecoin',
+    arb: 'arbitrum',
+    arbitrum: 'arbitrum',
+    cro: 'crypto-com-chain',
+    atom: 'cosmos',
+    cosmos: 'cosmos',
+    vet: 'vechain',
+    vechain: 'vechain',
+    render: 'render-token',
+    rndr: 'render-token',
+    mkr: 'maker',
+    maker: 'maker',
+    ftm: 'fantom',
+    fantom: 'fantom',
+    rune: 'thorchain',
+    thorchain: 'thorchain',
+    inj: 'injective-protocol',
+    injective: 'injective-protocol',
+    grt: 'the-graph',
+    tia: 'celestia',
+    celestia: 'celestia',
+    floki: 'floki',
+    bonk: 'bonk',
+    aave: 'aave',
+    algo: 'algorand',
+    algorand: 'algorand',
+    op: 'optimism',
+    optimism: 'optimism',
+    sei: 'sei-network',
+    theta: 'theta-token',
+    ftt: 'ftx-token',
+    sand: 'the-sandbox',
+    mana: 'decentraland',
+    axs: 'axie-infinity',
+    flow: 'flow',
+    egld: 'elrond-erd-2',
+    quant: 'quant-network',
+    qnt: 'quant-network',
+    chz: 'chiliz',
+    eos: 'eos',
+    kava: 'kava',
+    neo: 'neo',
+    gala: 'gala',
+    ldo: 'lido-dao',
+    wld: 'worldcoin-wld',
+    ondo: 'ondo-finance',
+    pendle: 'pendle',
+    btt: 'bittorrent',
+    pyth: 'pyth-network',
+    strk: 'starknet'
+};
+
+let geckoListCache = null;
+let geckoListFetchedAt = 0;
+
+const resolveCoinGeckoId = async (input) => {
+    if (!input) return null;
+    const clean = input.toLowerCase().trim();
+
+    if (COINGECKO_MAP[clean]) {
+        return COINGECKO_MAP[clean];
+    }
+
+    const cleanSlug = clean.replace(/[^a-z0-9]+/g, '-');
+    if (COINGECKO_MAP[cleanSlug]) {
+        return COINGECKO_MAP[cleanSlug];
+    }
+
+    try {
+        const now = Date.now();
+        if (!geckoListCache || now - geckoListFetchedAt > 24 * 60 * 60 * 1000) {
+            const res = await coinGeckoClient.get('/coins/list');
+            if (Array.isArray(res.data)) {
+                geckoListCache = res.data;
+                geckoListFetchedAt = now;
+            }
+        }
+
+        if (geckoListCache) {
+            const found = geckoListCache.find(c =>
+                c.symbol?.toLowerCase() === clean ||
+                c.name?.toLowerCase() === clean ||
+                c.id?.toLowerCase() === clean ||
+                c.id?.toLowerCase() === cleanSlug
+            );
+            if (found) {
+                COINGECKO_MAP[clean] = found.id;
+                return found.id;
+            }
+        }
+    } catch {}
+
+    return cleanSlug;
+};
+
 const normalizeCoinrankingList = (coins) => {
     return coins.map(coin => ({
         id: coin.uuid,
@@ -252,40 +405,24 @@ const fetchTopCoins = async (limit = 100) => {
 };
 
 const fetchCoinDetail = async (coinId, coinName = null, coinSymbol = null) => {
-    const slugCandidates = [];
-    if (coinName) {
-        slugCandidates.push(coinName.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
-    }
-    if (coinId && !/^[a-zA-Z0-9_-]{10,}$/.test(coinId)) {
-        slugCandidates.push(coinId.toLowerCase());
-    }
-    if (coinSymbol) {
-        slugCandidates.push(coinSymbol.toLowerCase());
-    }
+    const candidates = [coinSymbol, coinName, coinId].filter(Boolean);
 
-    for (const slug of slugCandidates) {
-        try {
-            console.log(`Fetching detail from CoinGecko for: ${slug}`);
-            const detail = await fetchCoinGeckoDetail(slug);
-            if (detail && detail.description) {
-                return detail;
+    for (const candidate of candidates) {
+        const resolvedId = await resolveCoinGeckoId(candidate);
+        if (resolvedId) {
+            try {
+                console.log(`Fetching detail from CoinGecko for: ${resolvedId}`);
+                const detail = await fetchCoinGeckoDetail(resolvedId);
+                if (detail && detail.description) {
+                    return detail;
+                }
+            } catch (err) {
+                console.warn(`CoinGecko candidate ${resolvedId} failed:`, err.message);
             }
-        } catch {}
-    }
-
-    const allowCoinranking = await cacheService.canUseCoinranking();
-    if (allowCoinranking) {
-        try {
-            console.log(`Falling back to Coinranking for: ${coinId}`);
-            const detail = await fetchCoinrankingDetail(coinId);
-            await cacheService.recordCoinrankingUsage();
-            return detail;
-        } catch (err) {
-            console.warn(`Coinranking detail failed for ${coinId}:`, err.message);
         }
     }
 
-    throw new Error(`All providers failed for coin detail: ${coinId}`);
+    throw new Error(`All free providers failed for coin detail: ${coinId}`);
 };
 
 const fetchCoinChart = async (coinId, timePeriod = '7d') => {
@@ -301,22 +438,12 @@ const fetchCoinChart = async (coinId, timePeriod = '7d') => {
     };
     const days = daysMap[timePeriod] || 7;
 
+    const resolvedId = await resolveCoinGeckoId(coinId);
     try {
-        console.log(`Fetching chart from CoinGecko for: ${coinId}, days: ${days}`);
-        return await fetchCoinGeckoChart(coinId.toLowerCase(), days);
+        console.log(`Fetching chart from CoinGecko for: ${resolvedId}, days: ${days}`);
+        return await fetchCoinGeckoChart(resolvedId, days);
     } catch (geckoErr) {
-        console.warn(`CoinGecko chart failed for ${coinId}:`, geckoErr.message);
-        const allowCoinranking = await cacheService.canUseCoinranking();
-        if (allowCoinranking) {
-            try {
-                console.log(`Falling back to Coinranking for chart: ${coinId}, period: ${timePeriod}`);
-                const history = await fetchCoinrankingHistory(coinId, timePeriod);
-                await cacheService.recordCoinrankingUsage();
-                return history;
-            } catch (err) {
-                console.error('Coinranking chart also failed:', err.message);
-            }
-        }
+        console.warn(`CoinGecko chart failed for ${resolvedId}:`, geckoErr.message);
         throw new Error(`All providers failed for chart: ${coinId}`);
     }
 };
