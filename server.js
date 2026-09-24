@@ -15,6 +15,8 @@ const reportRoutes = require('./routes/reportRoutes');
 const { startCryptoJob } = require('./scripts/cryptoCron');
 const app = express();
 
+app.set('trust proxy', 1);
+
 mongoose.set('strictQuery', false);
 connectDB();
 

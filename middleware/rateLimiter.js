@@ -5,6 +5,7 @@ const cryptoLimiter = rateLimit({
     max: 120,
     standardHeaders: true,
     legacyHeaders: false,
+    validate: { xForwardedForHeader: false },
     message: {
         success: false,
         error: 'Too many requests, please try again later.'
@@ -16,6 +17,7 @@ const coinDetailLimiter = rateLimit({
     max: 60,
     standardHeaders: true,
     legacyHeaders: false,
+    validate: { xForwardedForHeader: false },
     message: {
         success: false,
         error: 'Too many requests for coin details, please try again later.'
