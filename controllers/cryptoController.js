@@ -60,21 +60,90 @@ const getCoinDetail = async (req, res) => {
             });
         }
 
+        const coins = await cacheService.getCachedCoins();
+        const matched = coins?.find(c =>
+            c.id === id ||
+            c.symbol?.toLowerCase() === id.toLowerCase() ||
+            c.name?.toLowerCase() === id.toLowerCase()
+        );
+
+        if (!coinDetail && matched) {
+            coinDetail = await cacheService.getCachedCoinDetail(matched.id);
+        }
+
         if (!coinDetail || !coinDetail.description) {
             if (inFlightDetailRequests.has(id)) {
                 coinDetail = await inFlightDetailRequests.get(id);
             } else {
                 const fetchPromise = (async () => {
                     try {
-                        const detail = await cryptoService.fetchCoinDetail(id);
-                        await cacheService.cacheCoinDetail(id, detail);
-                        return detail;
+                        const targetId = matched ? matched.id : id;
+                        const coinName = matched ? matched.name : null;
+                        const coinSymbol = matched ? matched.symbol : null;
+
+                        const fullDetail = await cryptoService.fetchCoinDetail(targetId, coinName, coinSymbol);
+
+                        const finalDetail = matched ? {
+                            ...fullDetail,
+                            id: matched.id,
+                            symbol: matched.symbol,
+                            name: matched.name,
+                            image: fullDetail.image || matched.image,
+                            current_price: matched.current_price || fullDetail.current_price,
+                            market_cap: matched.market_cap || fullDetail.market_cap,
+                            total_volume: matched.total_volume || fullDetail.total_volume,
+                            price_change_percentage_24h: matched.price_change_percentage_24h || fullDetail.price_change_percentage_24h,
+                            market_cap_rank: matched.market_cap_rank || fullDetail.market_cap_rank,
+                            sparkline: matched.sparkline?.length > 0 ? matched.sparkline : fullDetail.sparkline,
+                            last_updated: matched.last_updated || fullDetail.last_updated || new Date().toISOString()
+                        } : fullDetail;
+
+                        await cacheService.cacheCoinDetail(targetId, finalDetail);
+                        if (matched) {
+                            if (matched.symbol) {
+                                await cacheService.cacheCoinDetail(matched.symbol.toLowerCase(), finalDetail);
+                            }
+                            if (matched.name) {
+                                await cacheService.cacheCoinDetail(matched.name.toLowerCase(), finalDetail);
+                            }
+                        }
+
+                        return finalDetail;
                     } catch (fetchErr) {
                         if (fetchErr.isNotFound || fetchErr.statusCode === 404) {
                             await cacheService.cacheCoinDetail(id, { notFound: true }, 300);
                         }
                         if (coinDetail) {
                             return coinDetail;
+                        }
+                        if (matched) {
+                            return {
+                                id: matched.id,
+                                symbol: matched.symbol,
+                                name: matched.name,
+                                image: matched.image,
+                                description: null,
+                                market_cap_rank: matched.market_cap_rank,
+                                current_price: matched.current_price,
+                                market_cap: matched.market_cap,
+                                total_volume: matched.total_volume,
+                                high_24h: null,
+                                low_24h: null,
+                                price_change_24h: null,
+                                price_change_percentage_24h: matched.price_change_percentage_24h,
+                                circulating_supply: null,
+                                total_supply: null,
+                                max_supply: null,
+                                ath: null,
+                                ath_date: null,
+                                atl: null,
+                                atl_date: null,
+                                sparkline: matched.sparkline || [],
+                                links: [],
+                                tags: [],
+                                last_updated: matched.last_updated || new Date().toISOString(),
+                                provider: matched.provider || 'coinranking'
+                            };
                         }
                         throw fetchErr;
                     } finally {

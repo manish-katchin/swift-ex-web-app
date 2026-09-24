@@ -110,12 +110,17 @@ const cacheCoinDetail = async (coinId, detail, customTTL = TTL.COIN_DETAIL) => {
 
 const getCachedCoinDetail = async (coinId) => {
     try {
+        const idLower = (coinId || '').toLowerCase();
         const key = CACHE_KEYS.COIN_DETAIL + coinId;
-        const memData = getMemory(key);
+        const keyLower = CACHE_KEYS.COIN_DETAIL + idLower;
+        const memData = getMemory(key) || getMemory(keyLower);
         if (memData) {
             return memData;
         }
-        const data = await redisClient.get(key);
+        let data = await redisClient.get(key);
+        if (!data && idLower !== coinId) {
+            data = await redisClient.get(keyLower);
+        }
         if (data) {
             const parsed = JSON.parse(data);
             setMemory(key, parsed, 300);
@@ -124,7 +129,7 @@ const getCachedCoinDetail = async (coinId) => {
         return null;
     } catch (err) {
         console.error('Get cached coin detail error:', err.message);
-        return getMemory(CACHE_KEYS.COIN_DETAIL + coinId);
+        return getMemory(CACHE_KEYS.COIN_DETAIL + coinId) || getMemory(CACHE_KEYS.COIN_DETAIL + (coinId || '').toLowerCase());
     }
 };
 
@@ -138,7 +143,10 @@ const batchUpdateCoinDetails = async (coins) => {
 
         for (const coin of coins) {
             const key = CACHE_KEYS.COIN_DETAIL + coin.id;
-            const existing = getMemory(key);
+            const symKey = coin.symbol ? CACHE_KEYS.COIN_DETAIL + coin.symbol.toLowerCase() : null;
+            const nameKey = coin.name ? CACHE_KEYS.COIN_DETAIL + coin.name.toLowerCase() : null;
+
+            const existing = getMemory(key) || (symKey ? getMemory(symKey) : null);
 
             let detail;
             if (existing && existing.description) {
@@ -183,10 +191,29 @@ const batchUpdateCoinDetails = async (coins) => {
             }
 
             setMemory(key, detail, TTL.COIN_DETAIL);
+            if (symKey) {
+                setMemory(symKey, detail, TTL.COIN_DETAIL);
+            }
+            if (nameKey) {
+                setMemory(nameKey, detail, TTL.COIN_DETAIL);
+            }
+
             if (pipeline) {
                 pipeline.setex(key, TTL.COIN_DETAIL, JSON.stringify(detail));
+                if (symKey) {
+                    pipeline.setex(symKey, TTL.COIN_DETAIL, JSON.stringify(detail));
+                }
+                if (nameKey) {
+                    pipeline.setex(nameKey, TTL.COIN_DETAIL, JSON.stringify(detail));
+                }
             } else {
                 await redisClient.setex(key, TTL.COIN_DETAIL, JSON.stringify(detail));
+                if (symKey) {
+                    await redisClient.setex(symKey, TTL.COIN_DETAIL, JSON.stringify(detail));
+                }
+                if (nameKey) {
+                    await redisClient.setex(nameKey, TTL.COIN_DETAIL, JSON.stringify(detail));
+                }
             }
         }
 

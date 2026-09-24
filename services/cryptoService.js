@@ -98,7 +98,7 @@ const normalizeCoinGeckoDetail = (coin) => ({
     symbol: coin.symbol?.toUpperCase(),
     name: coin.name,
     image: coin.image?.large || coin.image?.small,
-    description: coin.description?.en?.split('.').slice(0, 3).join('.') + '.',
+    description: coin.description?.en || null,
     market_cap_rank: coin.market_cap_rank,
     current_price: coin.market_data?.current_price?.usd,
     market_cap: coin.market_data?.market_cap?.usd,
@@ -115,8 +115,8 @@ const normalizeCoinGeckoDetail = (coin) => ({
     atl: coin.market_data?.atl?.usd,
     atl_date: coin.market_data?.atl_date?.usd,
     sparkline: [],
-    links: [],
-    tags: [],
+    links: Array.isArray(coin.links?.homepage) ? coin.links.homepage.filter(Boolean).map(url => ({ name: 'Website', type: 'website', url })) : [],
+    tags: Array.isArray(coin.categories) ? coin.categories.filter(Boolean) : [],
     last_updated: coin.last_updated,
     provider: 'coingecko'
 });
@@ -251,47 +251,41 @@ const fetchTopCoins = async (limit = 100) => {
     }
 };
 
-const fetchCoinDetail = async (coinId, symbol = null) => {
+const fetchCoinDetail = async (coinId, coinName = null, coinSymbol = null) => {
+    const slugCandidates = [];
+    if (coinName) {
+        slugCandidates.push(coinName.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+    }
+    if (coinId && !/^[a-zA-Z0-9_-]{10,}$/.test(coinId)) {
+        slugCandidates.push(coinId.toLowerCase());
+    }
+    if (coinSymbol) {
+        slugCandidates.push(coinSymbol.toLowerCase());
+    }
+
+    for (const slug of slugCandidates) {
+        try {
+            console.log(`Fetching detail from CoinGecko for: ${slug}`);
+            const detail = await fetchCoinGeckoDetail(slug);
+            if (detail && detail.description) {
+                return detail;
+            }
+        } catch {}
+    }
+
     const allowCoinranking = await cacheService.canUseCoinranking();
     if (allowCoinranking) {
         try {
-            console.log(`Fetching detail from Coinranking: ${coinId}`);
+            console.log(`Falling back to Coinranking for: ${coinId}`);
             const detail = await fetchCoinrankingDetail(coinId);
             await cacheService.recordCoinrankingUsage();
             return detail;
         } catch (err) {
             console.warn(`Coinranking detail failed for ${coinId}:`, err.message);
-            if (err.response?.status === 429 || err.response?.status === 404 || err.response?.status === 400) {
-                try {
-                    console.log(`Falling back to CoinGecko for: ${coinId}`);
-                    return await fetchCoinGeckoDetail(coinId.toLowerCase());
-                } catch (geckoErr) {
-                    console.error('CoinGecko detail also failed:', geckoErr.message);
-                    if (geckoErr.response?.status === 404) {
-                        const notFoundErr = new Error(`Coin not found: ${coinId}`);
-                        notFoundErr.statusCode = 404;
-                        notFoundErr.isNotFound = true;
-                        throw notFoundErr;
-                    }
-                }
-            }
-            throw new Error(`All providers failed for coin detail: ${coinId}`);
         }
     }
 
-    try {
-        console.log(`Coinranking budget reached, using CoinGecko for: ${coinId}`);
-        return await fetchCoinGeckoDetail(coinId.toLowerCase());
-    } catch (geckoErr) {
-        console.error('CoinGecko detail failed:', geckoErr.message);
-        if (geckoErr.response?.status === 404) {
-            const notFoundErr = new Error(`Coin not found: ${coinId}`);
-            notFoundErr.statusCode = 404;
-            notFoundErr.isNotFound = true;
-            throw notFoundErr;
-        }
-        throw new Error(`All providers failed for coin detail: ${coinId}`);
-    }
+    throw new Error(`All providers failed for coin detail: ${coinId}`);
 };
 
 const fetchCoinChart = async (coinId, timePeriod = '7d') => {
@@ -307,32 +301,22 @@ const fetchCoinChart = async (coinId, timePeriod = '7d') => {
     };
     const days = daysMap[timePeriod] || 7;
 
-    const allowCoinranking = await cacheService.canUseCoinranking();
-    if (allowCoinranking) {
-        try {
-            console.log(`Fetching history from Coinranking: ${coinId}, period: ${timePeriod}`);
-            const history = await fetchCoinrankingHistory(coinId, timePeriod);
-            await cacheService.recordCoinrankingUsage();
-            return history;
-        } catch (err) {
-            console.warn(`Coinranking history failed for ${coinId}:`, err.message);
-            if (err.response?.status === 429 || err.response?.status === 404) {
-                try {
-                    console.log(`Falling back to CoinGecko for chart: ${coinId}, days: ${days}`);
-                    return await fetchCoinGeckoChart(coinId.toLowerCase(), days);
-                } catch (geckoErr) {
-                    console.error('CoinGecko chart also failed:', geckoErr.message);
-                }
-            }
-            throw new Error(`All providers failed for chart: ${coinId}`);
-        }
-    }
-
     try {
-        console.log(`Coinranking budget reached, using CoinGecko for chart: ${coinId}, days: ${days}`);
+        console.log(`Fetching chart from CoinGecko for: ${coinId}, days: ${days}`);
         return await fetchCoinGeckoChart(coinId.toLowerCase(), days);
     } catch (geckoErr) {
-        console.error('CoinGecko chart failed:', geckoErr.message);
+        console.warn(`CoinGecko chart failed for ${coinId}:`, geckoErr.message);
+        const allowCoinranking = await cacheService.canUseCoinranking();
+        if (allowCoinranking) {
+            try {
+                console.log(`Falling back to Coinranking for chart: ${coinId}, period: ${timePeriod}`);
+                const history = await fetchCoinrankingHistory(coinId, timePeriod);
+                await cacheService.recordCoinrankingUsage();
+                return history;
+            } catch (err) {
+                console.error('Coinranking chart also failed:', err.message);
+            }
+        }
         throw new Error(`All providers failed for chart: ${coinId}`);
     }
 };
