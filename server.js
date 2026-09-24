@@ -1,4 +1,5 @@
 const express = require('express');
+const helmet = require('helmet');
 const mongoose = require('mongoose');
 const connectDB = require('./config/db');
 const { redisClient } = require('./config/redis');
@@ -23,6 +24,10 @@ redisClient.connect().then(() => {
 }).catch((err) => {
   console.error('Redis connection failed:', err.message);
 });
+
+app.use(helmet({
+  crossOriginResourcePolicy: false
+}));
 
 app.use(cors({
   origin: 'http://localhost:3000',

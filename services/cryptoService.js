@@ -1,4 +1,5 @@
 const axios = require('axios');
+const cacheService = require('./cacheService');
 const PROVIDERS = {
     COINRANKING: 'https://api.coinranking.com',
     COINGECKO: 'https://api.coingecko.com/api/v3'
@@ -127,6 +128,22 @@ const normalizeCoinGeckoChart = (data) => ({
 });
 
 const fetchCoinrankingCoins = async (limit = 100) => {
+    if (limit <= 100) {
+        const response = await coinrankingClient.get('/v2/coins', {
+            params: {
+                limit,
+                offset: 0,
+                orderBy: 'marketCap',
+                orderDirection: 'desc'
+            }
+        });
+
+        if (response.data?.status === 'success' && response.data?.data?.coins) {
+            return normalizeCoinrankingList(response.data.data.coins);
+        }
+        throw new Error('Invalid response from Coinranking');
+    }
+
     const coins = [];
     const pageSize = 50;
     const pages = Math.ceil(limit / pageSize);
@@ -210,73 +227,112 @@ const fetchCoinGeckoChart = async (coinId, days = 7) => {
 };
 
 const fetchTopCoins = async (limit = 100) => {
-    try {
-        console.log('Fetching coins from Coinranking...');
-        const coins = await fetchCoinrankingCoins(limit);
-        console.log(`Coinranking: Got ${coins.length} coins`);
-        return coins;
-    } catch (err) {
-        console.warn('Coinranking failed:', err.message);
-
-        if (err.response?.status === 429) {
-            console.warn('Coinranking rate limited, falling back to CoinGecko...');
-        }
+    const allowCoinranking = await cacheService.canUseCoinranking();
+    if (allowCoinranking) {
         try {
-            console.log('Falling back to CoinGecko...');
-            const coins = await fetchCoinGeckoCoins(limit);
-            console.log(`CoinGecko: Got ${coins.length} coins`);
+            console.log('Fetching coins from Coinranking...');
+            const coins = await fetchCoinrankingCoins(limit);
+            await cacheService.recordCoinrankingUsage();
+            console.log(`Coinranking: Got ${coins.length} coins`);
             return coins;
-        } catch (geckoErr) {
-            console.error('CoinGecko also failed:', geckoErr.message);
-            throw new Error('All providers failed for coins list');
+        } catch (err) {
+            console.warn('Coinranking failed:', err.message);
         }
+    }
+
+    try {
+        console.log('Fetching coins from CoinGecko...');
+        const coins = await fetchCoinGeckoCoins(limit);
+        console.log(`CoinGecko: Got ${coins.length} coins`);
+        return coins;
+    } catch (geckoErr) {
+        console.error('CoinGecko also failed:', geckoErr.message);
+        throw new Error('All providers failed for coins list');
     }
 };
 
 const fetchCoinDetail = async (coinId, symbol = null) => {
-    try {
-        console.log(`Fetching detail from Coinranking: ${coinId}`);
-        return await fetchCoinrankingDetail(coinId);
-    } catch (err) {
-        console.warn(`Coinranking detail failed for ${coinId}:`, err.message);
-        if (err.response?.status === 429 || err.response?.status === 404) {
-            try {
-                console.log(`Falling back to CoinGecko for: ${coinId}`);
-                return await fetchCoinGeckoDetail(coinId.toLowerCase());
-            } catch (geckoErr) {
-                console.error('CoinGecko detail also failed:', geckoErr.message);
+    const allowCoinranking = await cacheService.canUseCoinranking();
+    if (allowCoinranking) {
+        try {
+            console.log(`Fetching detail from Coinranking: ${coinId}`);
+            const detail = await fetchCoinrankingDetail(coinId);
+            await cacheService.recordCoinrankingUsage();
+            return detail;
+        } catch (err) {
+            console.warn(`Coinranking detail failed for ${coinId}:`, err.message);
+            if (err.response?.status === 429 || err.response?.status === 404 || err.response?.status === 400) {
+                try {
+                    console.log(`Falling back to CoinGecko for: ${coinId}`);
+                    return await fetchCoinGeckoDetail(coinId.toLowerCase());
+                } catch (geckoErr) {
+                    console.error('CoinGecko detail also failed:', geckoErr.message);
+                    if (geckoErr.response?.status === 404) {
+                        const notFoundErr = new Error(`Coin not found: ${coinId}`);
+                        notFoundErr.statusCode = 404;
+                        notFoundErr.isNotFound = true;
+                        throw notFoundErr;
+                    }
+                }
             }
+            throw new Error(`All providers failed for coin detail: ${coinId}`);
+        }
+    }
+
+    try {
+        console.log(`Coinranking budget reached, using CoinGecko for: ${coinId}`);
+        return await fetchCoinGeckoDetail(coinId.toLowerCase());
+    } catch (geckoErr) {
+        console.error('CoinGecko detail failed:', geckoErr.message);
+        if (geckoErr.response?.status === 404) {
+            const notFoundErr = new Error(`Coin not found: ${coinId}`);
+            notFoundErr.statusCode = 404;
+            notFoundErr.isNotFound = true;
+            throw notFoundErr;
         }
         throw new Error(`All providers failed for coin detail: ${coinId}`);
     }
 };
 
 const fetchCoinChart = async (coinId, timePeriod = '7d') => {
-    try {
-        console.log(`Fetching history from Coinranking: ${coinId}, period: ${timePeriod}`);
-        return await fetchCoinrankingHistory(coinId, timePeriod);
-    } catch (err) {
-        console.warn(`Coinranking history failed for ${coinId}:`, err.message);
-        if (err.response?.status === 429 || err.response?.status === 404) {
-            try {
-                const daysMap = {
-                    '3h': 1,
-                    '24h': 1,
-                    '7d': 7,
-                    '30d': 30,
-                    '3m': 90,
-                    '1y': 365,
-                    '3y': 1095,
-                    '5y': 1825
-                };
-                const days = daysMap[timePeriod] || 7;
+    const daysMap = {
+        '3h': 1,
+        '24h': 1,
+        '7d': 7,
+        '30d': 30,
+        '3m': 90,
+        '1y': 365,
+        '3y': 1095,
+        '5y': 1825
+    };
+    const days = daysMap[timePeriod] || 7;
 
-                console.log(`Falling back to CoinGecko for chart: ${coinId}, days: ${days}`);
-                return await fetchCoinGeckoChart(coinId.toLowerCase(), days);
-            } catch (geckoErr) {
-                console.error('CoinGecko chart also failed:', geckoErr.message);
+    const allowCoinranking = await cacheService.canUseCoinranking();
+    if (allowCoinranking) {
+        try {
+            console.log(`Fetching history from Coinranking: ${coinId}, period: ${timePeriod}`);
+            const history = await fetchCoinrankingHistory(coinId, timePeriod);
+            await cacheService.recordCoinrankingUsage();
+            return history;
+        } catch (err) {
+            console.warn(`Coinranking history failed for ${coinId}:`, err.message);
+            if (err.response?.status === 429 || err.response?.status === 404) {
+                try {
+                    console.log(`Falling back to CoinGecko for chart: ${coinId}, days: ${days}`);
+                    return await fetchCoinGeckoChart(coinId.toLowerCase(), days);
+                } catch (geckoErr) {
+                    console.error('CoinGecko chart also failed:', geckoErr.message);
+                }
             }
+            throw new Error(`All providers failed for chart: ${coinId}`);
         }
+    }
+
+    try {
+        console.log(`Coinranking budget reached, using CoinGecko for chart: ${coinId}, days: ${days}`);
+        return await fetchCoinGeckoChart(coinId.toLowerCase(), days);
+    } catch (geckoErr) {
+        console.error('CoinGecko chart failed:', geckoErr.message);
         throw new Error(`All providers failed for chart: ${coinId}`);
     }
 };
